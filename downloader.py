@@ -90,15 +90,19 @@ class DownloaderApp(tk.Tk):
     def _build_opts(self) -> dict:
         fmt = self.fmt_var.get()
         fmt_map = {
-            "動画 (最高画質)": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-            "動画 1080p": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]",
-            "動画 720p": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]",
-            "動画 480p": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]",
+            # mergeフォーマット: ffmpegマージを前提に最良ストリームを選択
+            "動画 (最高画質)": "bestvideo+bestaudio/best",
+            "動画 1080p": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+            "動画 720p": "bestvideo[height<=720]+bestaudio/best[height<=720]",
+            "動画 480p": "bestvideo[height<=480]+bestaudio/best[height<=480]",
             "音声のみ (MP3)": "bestaudio/best",
         }
         opts = {
             "outtmpl": f"{self._save_dir}/%(title)s.%(ext)s",
             "format": fmt_map[fmt],
+            "merge_output_format": "mp4",          # マージ後の出力形式を統一
+            "concurrent_fragment_downloads": 4,    # フラグメントを4並列でDL
+            "throttledratelimit": 100_000,          # 100KB/s以下でスロットリング検出・再試行
             "progress_hooks": [self._progress_hook],
             "logger": _QtLogger(self._log),
             "noplaylist": True,
@@ -107,8 +111,16 @@ class DownloaderApp(tk.Tk):
             opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
         return opts
 
+    # GUI更新を0.5秒に間引くための最終更新時刻
+    _last_progress_update: float = 0.0
+
     def _progress_hook(self, d: dict):
+        import time
         if d["status"] == "downloading":
+            now = time.monotonic()
+            if now - self._last_progress_update < 0.5:
+                return  # 0.5秒未満の更新は無視してGUI負荷を軽減
+            self._last_progress_update = now
             total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
             downloaded = d.get("downloaded_bytes", 0)
             if total > 0:
@@ -118,6 +130,7 @@ class DownloaderApp(tk.Tk):
             eta = d.get("_eta_str", "")
             self._log(f"  {d.get('_percent_str', '').strip():>7}  速度: {speed}  残り: {eta}", replace_last=True)
         elif d["status"] == "finished":
+            self._last_progress_update = 0.0
             self.progress["value"] = 100
             self._log(f"  処理中: {d['filename']}")
 
