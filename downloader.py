@@ -118,7 +118,7 @@ class DownloaderApp(tk.Tk):
         import time
         if d["status"] == "downloading":
             now = time.monotonic()
-            if now - self._last_progress_update < 0.5:
+            if now - self._last_progress_update < 1.0:
                 return  # 0.5秒未満の更新は無視してGUI負荷を軽減
             self._last_progress_update = now
             total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
